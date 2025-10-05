@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Asteroid Impact Simulator — Auto Impact & Damage</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    :root {
+      --bg1: #0a0e1a;
+      --card: rgba(15,23,42,0.55);
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(135deg,var(--bg1) 0%, #0f1419 50%, var(--bg1) 100%);
+      color: #f8fafc;
+      padding: 18px;
+      min-height:100vh;
+    }
+    .container{max-width:1200px;margin:0 auto}
+    .header{text-align:center;margin-bottom:18px}
+    h1{font-size:1.9rem; background: linear-gradient(90deg,#22d3ee,#60a5fa); -webkit-background-clip:text; color:transparent}
+    p.lead{color:var(--muted);margin-top:6px}
+
+    .layout{display:grid;grid-template-columns:360px 1fr;gap:16px}
+    @media (max-width:980px){.layout{grid-template-columns:1fr}}
+
+    .card{
+      background:var(--card);
+      border:1px solid rgba(30,41,59,0.8);
+      border-radius:10px;padding:14px;
+      backdrop-filter: blur(6px);
+    }
+
+    label{display:block;color:var(--muted);font-size:0.88rem;margin-bottom:6px}
+    input[type=range], select, input[type=number]{width:100%;padding:8px;border-radius:8px;border:1px solid #334155;background:rgba(30,41,59,0.45);color:#fff}
+    .row{margin-bottom:12px}
+    .controls .help{font-size:0.85rem;color:var(--muted);margin-top:6px}
+
+    .btn-row{display:flex;gap:10px;margin-top:8px}
+    button{padding:10px 14px;border-radius:8px;border:0;font-weight:600;cursor:pointer}
+    .btn-primary{background:linear-gradient(90deg,#0891b2,#2563eb);color:white;flex:1}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#fff}
+
+    #map{height:360px;border-radius:8px;overflow:hidden;margin-bottom:10px}
+    #canvas{width:100%;height:360px;border-radius:8px;background:#000;display:block}
+
+    .stats p{color:var(--muted);margin:6px 0}
+    .value{color:var(--accent);font-family:monospace}
+
+    .legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .legend .item{display:flex;gap:6px;align-items:center}
+    .swatch{width:18px;height:18px;border-radius:50%}
+    .sw-red{background:rgba(255,71,87,0.9)}
+    .sw-orange{background:rgba(255,160,64,0.8)}
+    .sw-yellow{background:rgba(255,210,80,0.7)}
+
+    footer{margin-top:14px;color:var(--muted);font-size:0.85rem}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Asteroid Impact Simulator — Auto Impact & Damage</h1>
+      <p class="lead">Click map to choose impact location, or press <strong>Auto Impact</strong> to let simulator pick a spot and estimate damage.</p>
+    </div>
+
+    <div class="layout">
+      <!-- LEFT: controls / results -->
+      <div class="card controls">
+<div class="row">
+  <label for="material">Material Type:</label>
+  <select id="material" name="material">
+    <option value="3300">🪨 Rock — 3,300 kg/m³</option>
+    <option value="7800">🔩 Iron — 7,800 kg/m³</option>
+    <option value="917">❄️ Ice — 917 kg/m³</option>
+    <option value="2500">☄️ Carbonaceous — 2,500 kg/m³</option>
+  </select>
+</div>
+
+
+        <div class="row">
+          <label>Diameter: <span id="diameter-label" class="value">50</span> m</label>
+          <input type="range" id="diameter" min="1" max="3000" value="50">
+        </div>
+
+        <div class="row">
+          <label>Velocity: <span id="velocity-label" class="value">20</span> km/s</label>
+          <input type="range" id="velocity" min="3" max="72" step="0.5" value="20">
+        </div>
+
+        <div class="row">
+          <label>Impact Angle: <span id="angle-label" class="value">45</span>°</label>
+          <input type="range" id="angle" min="5" max="90" value="45">
+        </div>
+
+        <div class="row">
+          <label>Custom Density (kg/m³)</label>
+          <input type="number" id="density" value="3300" min="100" max="20000">
+        </div>
+
+        <div class="btn-row">
+          <button id="auto-impact" class="btn-primary">🌐 Auto Impact </button>
+          <button id="launch" class="btn-ghost">🚀 Launch Impact</button>
+        </div>
+
+        <div class="btn-row" style="margin-top:8px">
+          <button id="clear" class="btn-ghost">♻️ Clear Map</button>
+          <button id="reset" class="btn-ghost">Reset</button>
+        </div>
+
+        <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)">
+
+        <div id="results">
+          <h3 style="margin-bottom:8px;color:#60a5fa">Impact Summary</h3>
+          <div class="stats">
+            <p>Location: <span id="loc-label" class="value">—</span></p>
+            <p>Mass: <span id="mass-val" class="value">—</span></p>
+            <p>Energy: <span id="energy-val" class="value">—</span></p>
+            <p>TNT equivalent: <span id="tnt-val" class="value">—</span></p>
+            <p>Crater diameter (est): <span id="crater-val" class="value">—</span></p>
+            <p>Airburst: <span id="airburst-val" class="value">—</span></p>
+            <p>Estimated wind (km/h): <span id="wind-val" class="value">—</span></p>
+          </div>
+
+          <h4 style="margin-top:10px;color:#60a5fa">Damage estimate (zones)</h4>
+          <div class="legend">
+            <div class="item"><div class="swatch sw-red"></div><div>Severe / near-total destruction</div></div>
+            <div class="item"><div class="swatch sw-orange"></div><div>Heavy structural damage</div></div>
+            <div class="item"><div class="swatch sw-yellow"></div><div>Moderate / broken windows</div></div>
+          </div>
+
+          <h4 style="margin-top:10px;color:#60a5fa">Estimated casualties (approx)</h4>
+          <div class="stats">
+            <p>Severe zone fatalities: <span id="fatal-severe" class="value">—</span></p>
+            <p>Heavy zone fatalities: <span id="fatal-heavy" class="value">—</span></p>
+            <p>Moderate zone injured: <span id="inj-moderate" class="value">—</span></p>
+          </div>
+          <p class="help" style="color:var(--muted);font-size:0.85rem;margin-top:8px">
+            These casualty numbers are rough approximations derived from zone areas and assumed population density. Use them for educational/illustrative purposes only.
+          </p>
+        </div>
+      </div>
+
+      <!-- RIGHT: map + canvas -->
+      <div>
+        <div class="card" id="mapCard">
+          <div id="map"></div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <canvas id="canvas" width="1200" height="360"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <footer>Formulas: energy = 0.5*m*v², energy Mt = J / 4.184e15. Radii scale ~ cube-root of yield (simplified).</footer>
+  </div>
+
+<script>
+/* ---------- Utilities ---------- */
+function fmtCompact(n){
+  if (!isFinite(n) || isNaN(n)) return '—';
+  if (Math.abs(n) >= 1e12) return (n/1e12).toFixed(2) + 'T';
+  if (Math.abs(n) >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(2) + 'k';
+  return n.toFixed(2);
+}
+function safeFixed(n, d=2){
+  if (!isFinite(n) || isNaN(n)) return '—';
+  return n.toFixed(d);
+}
+
+/* ---------- Map setup ---------- */
+const map = L.map('map', { worldCopyJump:true }).setView([20, 0], 2);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+let marker = null;
+let rings = []; // circle layers
+let autoImpactLocation = null;
+let impactLocation = null; // global selected location
+
+/* ---------- Controls ---------- */
+const el = id => document.getElementById(id);
+const diameterEl = el('diameter');
+const velocityEl = el('velocity');
+const angleEl = el('angle');
+const densityEl = el('density');
+const materialEl = el('material');
+
+const diameterLabel = el('diameter-label');
+const velocityLabel = el('velocity-label');
+const angleLabel = el('angle-label');
+
+diameterEl.oninput = () => diameterLabel.textContent = diameterEl.value;
+velocityEl.oninput = () => velocityLabel.textContent = velocityEl.value;
+angleEl.oninput = () => angleLabel.textContent = angleEl.value;
+
+/* ensure density sync on load */
+densityEl.value = materialEl.value;
+
+/* ---------- Physics computations ---------- */
+/*
+  This uses simplified, but more physically coherent formulas:
+  - Mass from volume (sphere) and density
+  - Kinetic energy E = 0.5 * m * v^2 (J) where v in m/s
+  - Energy in megatons TNT: Mt = E / 4.184e15
+  - Crater diameter and blast radii use simple scaling proportional to (yield)^(1/3).
+  - We keep angle effects as modifiers (vertical component increases ground coupling).
+*/
+function computeImpact(params){
+  // params: {D (m), density (kg/m3), velocity (km/s), angleDeg}
+  const D = Math.max(0.0001, params.D);
+  const r = D/2;
+  const rho = Math.max(1, params.density);
+  const v = Math.max(0.1, params.velocity) * 1000; // m/s
+  const volume = (4/3) * Math.PI * Math.pow(r,3);
+  const mass = rho * volume; // kg
+
+  // Kinetic energy (full). For coupling to ground, vertical component matters:
+  const angleRad = params.angleDeg * Math.PI / 180;
+  const verticalFraction = Math.sin(angleRad); // 0..1
+  const energyTotal = 0.5 * mass * v * v; // Joules
+  // Effective coupled energy to ground uses vertical component squared (approx)
+  const coupledEnergy = energyTotal * Math.pow(verticalFraction, 1.7); // exponent tuned for demo
+  const energyMt = coupledEnergy / 4.184e15; // megatons TNT equivalent (approx)
+
+  // Crater scaling (very approximate): crater diameter increases with object size and energy coupling.
+  // This is a rough empirical formula for demo purposes:
+  const craterDiameter = Math.max(0.1, 1.3 * D * Math.pow(rho/2500, 1/3) * Math.pow(v/15000, 0.3) * verticalFraction);
+
+  // Airburst heuristic: small, low-density objects at high alt -> tend to break up.
+  // We'll use a simple rule: if object < 50 m and density < 2000 and entryPressure < threshold -> airburst.
+  // entryPressure proxy:
+  const entryPressureProxy = rho * v * 1e-6; // arbitrary proxy; larger -> more likely to reach ground
+  const airburst = (D < 50 && rho < 2000 && energyMt < 0.5 && entryPressureProxy < 8);
+
+  return { mass, energyTotal, coupledEnergy, energyMt, craterDiameter, airburst, verticalFraction };
+}
+
+/* ---------- Damage radii model (simplified) ---------- */
+/*
+  Cube-root scaling with yield in Mt:
+    base = scaleFactor * (E_mt)^(1/3)  (meters)
+  scaleFactor chosen so that 1 Mt -> base ~ 1000 m (demo)
+  Then rings:
+    severeRadius = base * 0.6
+    heavyRadius   = base * 1.5
+    moderateRadius= base * 3.0
+*/
+function damageRadii(energyMt){
+  const E = Math.max(energyMt, 1e-12);
+  const scaleFactor = 1000; // 1 Mt -> ~1000 m base (tunable)
+  const base = scaleFactor * Math.pow(E, 1/3);
+  const severe = Math.max(10, base * 0.6);
+  const heavy = Math.max(severe + 10, base * 1.5);
+  const moderate = Math.max(heavy + 10, base * 3.0);
+  return { severe, heavy, moderate };
+}
+
+/* ---------- Casualty estimation (very rough) ---------- */
+function estimateCasualties(radiiMeters, zoom){
+  const area = (r => Math.PI * (r/1000) * (r/1000)); // km^2
+  let density;
+  if (zoom >= 10) density = 4000;      // high urban
+  else if (zoom >= 8) density = 2000;  // urban
+  else if (zoom >=5) density = 500;    // suburban
+  else density = 50;                   // rural
+
+  const aSevere = area(radiiMeters.severe);
+  const aHeavy = Math.max(0, area(radiiMeters.heavy) - aSevere);
+  const aModerate = Math.max(0, area(radiiMeters.moderate) - aSevere - aHeavy);
+
+  const popSevere = aSevere * density;
+  const popHeavy = aHeavy * density;
+  const popModerate = aModerate * density;
+
+  const fatalSevere = Math.round(popSevere * 0.6);
+  const fatalHeavy = Math.round(popHeavy * 0.12);
+  const injModerate = Math.round(popModerate * 0.05);
+
+  return {
+    popSevere, popHeavy, popModerate,
+    fatalSevere, fatalHeavy, injModerate,
+    densityUsed: density
+  };
+}
+
+/* ---------- Map interaction ---------- */
+map.on('click', e => {
+  placeMarker(e.latlng);
+  autoImpactLocation = null; // user selected overrides auto
+});
+
+function placeMarker(latlng){
+  if (marker) map.removeLayer(marker);
+  marker = L.marker(latlng).addTo(map);
+  impactLocation = latlng;
+  map.setView(latlng, Math.max(map.getZoom(),6));
+  // show coords in UI
+  el('loc-label').textContent = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+}
+
+/* ---------- Draw rings on map ---------- */
+function clearRings(){
+  rings.forEach(r=>{ try{ map.removeLayer(r);}catch(e){} });
+  rings = [];
+}
+function drawRings(latlng, radii, options = {}){
+  clearRings();
+  const red = L.circle(latlng, { radius: radii.severe, color:'#ff4757', fillColor:'#ff6b6b', fillOpacity:0.35, weight:2 }).addTo(map);
+  const orange = L.circle(latlng, { radius: radii.heavy, color:'#ff8c42', fillColor:'#ffb37a', fillOpacity:0.22, weight:1.5 }).addTo(map);
+  const yellow = L.circle(latlng, { radius: radii.moderate, color:'#ffd166', fillColor:'#ffe8a6', fillOpacity:0.12, weight:1 }).addTo(map);
+  rings.push(red, orange, yellow);
+}
+
+/* ---------- Canvas animation (simple explosion) ---------- */
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let particles = [];
+let animReq = null;
+
+function resizeCanvas(){
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  // If rect is zero (not yet laid out), fallback to existing width/height attributes
+  const wCss = rect.width || canvas.width / dpr;
+  const hCss = rect.height || canvas.height / dpr;
+  canvas.width = Math.max(1, Math.round(wCss * dpr));
+  canvas.height = Math.max(1, Math.round(hCss * dpr));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize', resizeCanvas);
+setTimeout(resizeCanvas, 50); // run after layout
+resizeCanvas();
+
+function startExplosion(energyMt){
+  cancelAnimation();
+  particles = [];
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const cx = rect.width / 2;
+  const cy = rect.height / 2;
+  const strength = Math.min(1200, 60 + Math.pow(Math.max(energyMt,1e-9), 0.33) * 800); // particle count proxy
+
+  for (let i=0;i<Math.round(strength);i++){
+    const a = Math.random() * Math.PI * 2;
+    const speed = Math.random()*4 + Math.random()*Math.pow(energyMt+0.0001, 0.2)*6;
+    particles.push({
+      x: cx, y: cy, vx: Math.cos(a)*speed, vy: Math.sin(a)*speed,
+      size: Math.random()*3 + 0.8,
+      life: 30 + Math.random()*90,
+      color: (Math.random()>0.5? `rgba(255,${120+Math.random()*100},${20+Math.random()*60},0.95)` : `rgba(255,${80+Math.random()*80},${30+Math.random()*50},0.9)`)
+    });
+  }
+  animLoop();
+}
+
+function animLoop(){
+  const rect = canvas.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0,0,w,h);
+  const g = ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#000');
+  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+
+  // draw core flash
+  ctx.beginPath(); ctx.fillStyle = 'rgba(255,200,120,0.08)';
+  ctx.arc(w/2,h/2,40,0,Math.PI*2); ctx.fill();
+
+  for (let p of particles){
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.98; p.vy *= 0.98;
+    p.life -= 1;
+    ctx.globalAlpha = Math.max(0, p.life/100);
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  particles = particles.filter(p=>p.life>0);
+  if (particles.length>0){
+    animReq = requestAnimationFrame(animLoop);
+  } else {
+    animReq = null;
+  }
+}
+function cancelAnimation(){
+  if (animReq) cancelAnimationFrame(animReq);
+  animReq = null;
+  particles = [];
+  // clear to base background
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width && rect.height){
+    ctx.clearRect(0,0,rect.width,rect.height);
+    const g = ctx.createLinearGradient(0,0,0,rect.height);
+    g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#000');
+    ctx.fillStyle = g; ctx.fillRect(0,0,rect.width,rect.height);
+  }
+}
+
+/* ---------- UI: Launch & Auto Impact ---------- */
+function gatherParams(){
+  const D = Number(diameterEl.value);
+  const density = Number(densityEl.value);
+  const velocity = Number(velocityEl.value);
+  const angleDeg = Number(angleEl.value);
+  return { D, density, velocity, angleDeg };
+}
+
+function updateSummary(impact, radii, casualties){
+  el('mass-val').textContent = fmtCompact(impact.mass) + ' kg';
+  el('energy-val').textContent = fmtCompact(impact.energyTotal) + ' J';
+  el('tnt-val').textContent = safeFixed(impact.energyMt, 6) + ' Mt (coupled)';
+  el('crater-val').textContent = (impact.craterDiameter ? safeFixed(impact.craterDiameter,1) + ' m' : '—');
+  el('airburst-val').textContent = impact.airburst ? 'Likely' : 'Unlikely';
+  el('wind-val').textContent = (20 + Math.pow(Math.max(impact.energyMt,1e-9),0.25)*80).toFixed(1);
+  el('fatal-severe').textContent = (casualties.fatalSevere>=0? casualties.fatalSevere.toLocaleString() : '—');
+  el('fatal-heavy').textContent = (casualties.fatalHeavy>=0? casualties.fatalHeavy.toLocaleString() : '—');
+  el('inj-moderate').textContent = (casualties.injModerate>=0? casualties.injModerate.toLocaleString() : '—');
+  el('loc-label').textContent = impactLocation ? `${impactLocation.lat.toFixed(4)}, ${impactLocation.lng.toFixed(4)}` : '—';
+}
+
+function performImpact(atLatLng){
+  if (!atLatLng) return;
+  const params = gatherParams();
+  const impact = computeImpact({ D: params.D, density: params.density, velocity: params.velocity, angleDeg: params.angleDeg });
+  const radii = damageRadii(impact.energyMt);
+  drawRings(atLatLng, radii);
+  const casualties = estimateCasualties(radii, map.getZoom());
+  updateSummary(impact, radii, casualties);
+  startExplosion(impact.energyMt);
+}
+
+/* Launch button (use selected marker or autoImpactLocation) */
+el('launch').addEventListener('click', () => {
+  const loc = impactLocation || autoImpactLocation;
+  if (!loc) {
+    alert('Choose a location on the map or press "Auto Impact" to pick one automatically.');
+    return;
+  }
+  performImpact(loc);
+});
+
+/* Auto Impact: pick a random plausible location (biased toward land latitudes) */
+function randomImpactLocation(){
+  // biased latitude sampling (more probability near mid-latitudes where land exists)
+  const latBias = () => {
+    // Use a beta-like distribution: push samples toward ±30..60
+    const u = Math.random();
+    const sign = Math.random()>0.5?1:-1;
+    return sign * (20 + Math.pow(u,0.6) * 60) * (0.8 + 0.4*Math.random());
+  };
+  const lat = Math.max(-85, Math.min(85, latBias()));
+  const lng = (Math.random() * 360 - 180);
+  return L.latLng(lat, lng);
+}
+
+el('auto-impact').addEventListener('click', () => {
+  autoImpactLocation = randomImpactLocation();
+  placeMarker(autoImpactLocation);
+  performImpact(autoImpactLocation);
+});
+
+/* Clear and Reset */
+el('clear').addEventListener('click', () => {
+  if (marker) { map.removeLayer(marker); marker = null; impactLocation = null; el('loc-label').textContent = '—'; }
+  clearRings();
+  autoImpactLocation = null;
+  cancelAnimation();
+});
+
+el('reset').addEventListener('click', () => {
+  // reset params & UI
+  diameterEl.value = 50; diameterLabel.textContent = 50;
+  velocityEl.value = 20; velocityLabel.textContent = 20;
+  angleEl.value = 45; angleLabel.textContent = 45;
+  densityEl.value = 3300;
+  materialEl.value = 3300;
+  cancelAnimation();
+  clearRings();
+  if (marker) { map.removeLayer(marker); marker = null; }
+  autoImpactLocation = null;
+  impactLocation = null;
+  el('loc-label').textContent = '—';
+  el('mass-val').textContent = '—';
+  el('energy-val').textContent = '—';
+  el('tnt-val').textContent = '—';
+  el('crater-val').textContent = '—';
+  el('airburst-val').textContent = '—';
+  el('wind-val').textContent = '—';
+  el('fatal-severe').textContent = '—';
+  el('fatal-heavy').textContent = '—';
+  el('inj-moderate').textContent = '—';
+});
+
+
+/*asdfsdafdasfsd*/
+/* Keep density consistent with material */
+materialEl.addEventListener('change', e => {
+  densityEl.value = materialEl.value;
+});
+
+/* If user types density manually, reflect change in material select if matches an option */
+densityEl.addEventListener('input', () => {
+  const val = String(Number(densityEl.value));
+  for (const opt of materialEl.options){
+    if (opt.value === val){
+      materialEl.value = val;
+      return;
+    }
+  }
+  // no exact match -> leave material select as-is (user custom)
+});
+
+
+
+
+
+
+
+
+
+/* initialize a gentle canvas scene */
+(function init(){
+  resizeCanvas();
+  // initial small animation / center dot
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width && rect.height){
+    ctx.clearRect(0,0,rect.width,rect.height);
+    const g = ctx.createLinearGradient(0,0,0,rect.height);
+    g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#000');
+    ctx.fillStyle = g; ctx.fillRect(0,0,rect.width,rect.height);
+    ctx.beginPath(); ctx.fillStyle = '#2563eb';
+    ctx.arc(rect.width/2, rect.height/2, 34, 0, Math.PI*2); ctx.fill();
+  }
+
+
+})();
+</script>
+
+</body>
+</html>
